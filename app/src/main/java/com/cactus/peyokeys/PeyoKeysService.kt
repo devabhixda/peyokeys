@@ -5,11 +5,20 @@ import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
+import com.cactus.CactusContextInitializer
+import com.cactus.CactusSTT
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class PeyoKeysService : InputMethodService() {
 
     private var isShifted = true  // Start with capital letters
     private val letterButtons = mutableMapOf<Char, Button>()
+    private lateinit var stt: CactusSTT
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     companion object {
         private const val TAG = "PeyoKeysService"
@@ -17,7 +26,15 @@ class PeyoKeysService : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
+        CactusContextInitializer.initialize(this)
+        stt = CactusSTT()
         Log.d(TAG, "onCreate() called")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceScope.cancel()
+        Log.d(TAG, "onDestroy() called")
     }
 
     override fun onCreateInputView(): View {
@@ -174,7 +191,21 @@ class PeyoKeysService : InputMethodService() {
     }
 
     private fun handleVoiceInput() {
-        Log.d(TAG, "Voice input triggered via long press on space")
-        // TODO: Implement voice input functionality
+        val activeModel = VoiceModelPreferences.getActiveModel(this) ?: "whisper-base"
+        Log.d(TAG, "Voice input triggered via long press on space, active model: $activeModel")
+
+        serviceScope.launch {
+            try {
+                if (!stt.isReady()) {
+                    stt.init(activeModel)
+                }
+                val result = stt.transcribe()
+                result?.let {
+                    currentInputConnection?.commitText(it.text, 1)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during voice input transcription", e)
+            }
+        }
     }
 }
