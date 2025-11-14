@@ -17,6 +17,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
+        android:layout_gravity="center_vertical"
         android:orientation="vertical">
 
         <TextView
@@ -26,7 +27,7 @@
             android:text="Model Name"
             android:textSize="16sp"
             android:textStyle="bold"
-            android:textColor="@color/white" />
+            android:textColor="?android:attr/textColorPrimary" />
 
         <TextView
             android:id="@+id/text_model_size"
@@ -34,25 +35,32 @@
             android:layout_height="wrap_content"
             android:text="Size"
             android:textSize="12sp"
-            android:textColor="#999999"
+            android:textColor="?android:attr/textColorSecondary"
             android:layout_marginTop="2dp" />
 
     </LinearLayout>
 
-    <ProgressBar
-        android:id="@+id/progress_download"
-        android:layout_width="24dp"
-        android:layout_height="24dp"
-        android:layout_gravity="center_vertical"
-        android:layout_marginEnd="8dp"
-        android:visibility="gone" />
-
-    <Button
-        android:id="@+id/button_download"
+    <FrameLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Download"
-        android:layout_gravity="center_vertical"
-        android:minWidth="100dp" />
+        android:layout_gravity="center_vertical">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/button_download"
+            style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:contentDescription="Download model"
+            app:icon="@android:drawable/stat_sys_download"
+            xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+        <ProgressBar
+            android:id="@+id/progress_download"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="center"
+            android:visibility="gone" />
+
+    </FrameLayout>
 
 </LinearLayout>

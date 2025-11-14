@@ -3,12 +3,12 @@ package com.cactus.peyokeys
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.cactus.VoiceModel
+import com.google.android.material.button.MaterialButton
 
 class VoiceModelAdapter(
     private val models: List<VoiceModel>,
@@ -25,7 +25,7 @@ class VoiceModelAdapter(
         val textModelName: TextView = view.findViewById(R.id.text_model_name)
         val textModelSize: TextView = view.findViewById(R.id.text_model_size)
         val progressDownload: ProgressBar = view.findViewById(R.id.progress_download)
-        val buttonDownload: Button = view.findViewById(R.id.button_download)
+        val buttonDownload: MaterialButton = view.findViewById(R.id.button_download)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -56,15 +56,19 @@ class VoiceModelAdapter(
         // Download button and progress
         if (isDownloading) {
             holder.progressDownload.visibility = View.VISIBLE
-            holder.buttonDownload.text = "Downloading..."
+            holder.buttonDownload.visibility = View.INVISIBLE
             holder.buttonDownload.isEnabled = false
         } else if (model.isDownloaded) {
             holder.progressDownload.visibility = View.GONE
-            holder.buttonDownload.text = "Downloaded"
+            holder.buttonDownload.visibility = View.VISIBLE
+            holder.buttonDownload.setIconResource(R.drawable.ic_check_circle)
+            holder.buttonDownload.contentDescription = "Model downloaded"
             holder.buttonDownload.isEnabled = false
         } else {
             holder.progressDownload.visibility = View.GONE
-            holder.buttonDownload.text = "Download"
+            holder.buttonDownload.visibility = View.VISIBLE
+            holder.buttonDownload.setIconResource(android.R.drawable.stat_sys_download)
+            holder.buttonDownload.contentDescription = "Download model"
             holder.buttonDownload.isEnabled = true
             holder.buttonDownload.setOnClickListener {
                 onDownloadClick(model, position)

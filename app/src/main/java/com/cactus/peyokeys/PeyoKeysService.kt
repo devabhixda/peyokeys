@@ -1,10 +1,15 @@
 package com.cactus.peyokeys
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
 import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
+import android.widget.Toast
+import androidx.core.content.ContextCompat
 import com.cactus.CactusContextInitializer
 import com.cactus.CactusSTT
 import kotlinx.coroutines.CoroutineScope
@@ -19,6 +24,8 @@ class PeyoKeysService : InputMethodService() {
     private val letterButtons = mutableMapOf<Char, Button>()
     private lateinit var stt: CactusSTT
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var spaceButton: Button? = null
+    private var isTranscribing = false
 
     companion object {
         private const val TAG = "PeyoKeysService"
@@ -124,15 +131,19 @@ class PeyoKeysService : InputMethodService() {
         }
 
         // Space key
-        val spaceButton = view.findViewById<Button>(R.id.key_space)
-        spaceButton.setOnClickListener {
-            currentInputConnection?.commitText(" ", 1)
-            checkAndUpdateShiftState()
+        spaceButton = view.findViewById<Button>(R.id.key_space)
+        spaceButton?.setOnClickListener {
+            if (!isTranscribing) {
+                currentInputConnection?.commitText(" ", 1)
+                checkAndUpdateShiftState()
+            }
         }
 
         // Long press on space for voice input
-        spaceButton.setOnLongClickListener {
-            handleVoiceInput()
+        spaceButton?.setOnLongClickListener {
+            if (!isTranscribing) {
+                handleVoiceInput()
+            }
             true
         }
 
@@ -191,11 +202,24 @@ class PeyoKeysService : InputMethodService() {
     }
 
     private fun handleVoiceInput() {
+        // Check for microphone permission
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "Microphone permission not granted, requesting permission")
+            requestMicrophonePermission()
+            return
+        }
+
         val activeModel = VoiceModelPreferences.getActiveModel(this) ?: "whisper-base"
         Log.d(TAG, "Voice input triggered via long press on space, active model: $activeModel")
 
         serviceScope.launch {
             try {
+                // Set transcribing state
+                isTranscribing = true
+                spaceButton?.text = "Transcribing..."
+                spaceButton?.alpha = 0.7f
+
                 if (!stt.isReady()) {
                     stt.init(activeModel)
                 }
@@ -205,7 +229,28 @@ class PeyoKeysService : InputMethodService() {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error during voice input transcription", e)
+                Toast.makeText(this@PeyoKeysService, "Transcription failed", Toast.LENGTH_SHORT).show()
+            } finally {
+                // Reset transcribing state
+                isTranscribing = false
+                spaceButton?.text = "hold to talk"
+                spaceButton?.alpha = 1.0f
             }
+        }
+    }
+
+    private fun requestMicrophonePermission() {
+        try {
+            // Launch MainActivity to request permission
+            val intent = Intent(this, MainActivity::class.java).apply {
+                action = MainActivity.ACTION_REQUEST_MICROPHONE_PERMISSION
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+            Toast.makeText(this, "Please grant microphone permission", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error requesting microphone permission", e)
+            Toast.makeText(this, "Unable to request permission", Toast.LENGTH_SHORT).show()
         }
     }
 }
