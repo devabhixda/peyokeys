@@ -8,10 +8,14 @@ import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.cactus.CactusContextInitializer
+import com.cactus.CactusLM
 import com.cactus.CactusSTT
+import com.cactus.CactusInitParams
+import com.cactus.ChatMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,10 +27,16 @@ class PeyoKeysService : InputMethodService() {
     private var isShifted = true  // Start with capital letters
     private val letterButtons = mutableMapOf<Char, Button>()
     private lateinit var stt: CactusSTT
+    private lateinit var lm: CactusLM
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var spaceButton: Button? = null
+    private var shiftButton: ImageButton? = null
     private var isTranscribing = false
     private var isNumbersLayout = false
+
+    // Draft button state management
+    private var draftButton: Button? = null
+    private var isDrafting = false
 
     companion object {
         private const val TAG = "PeyoKeysService"
@@ -36,12 +46,18 @@ class PeyoKeysService : InputMethodService() {
         super.onCreate()
         CactusContextInitializer.initialize(this)
         stt = CactusSTT()
+        lm = CactusLM()
         Log.d(TAG, "onCreate() called")
     }
 
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
+        try {
+            lm.unload()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unloading LM model", e)
+        }
         Log.d(TAG, "onDestroy() called")
     }
 
@@ -113,13 +129,15 @@ class PeyoKeysService : InputMethodService() {
         setupLetterKey(view, R.id.key_m, "M")
 
         // Shift key
-        view.findViewById<Button>(R.id.key_shift).setOnClickListener {
+        shiftButton = view.findViewById<ImageButton>(R.id.key_shift)
+        shiftButton?.setOnClickListener {
             isShifted = !isShifted
             updateLetterCase()
+            updateShiftIcon()
         }
 
         // Backspace key
-        view.findViewById<Button>(R.id.key_backspace).setOnClickListener {
+        view.findViewById<ImageButton>(R.id.key_backspace).setOnClickListener {
             currentInputConnection?.deleteSurroundingText(1, 0)
             checkAndUpdateShiftState()
         }
@@ -153,6 +171,14 @@ class PeyoKeysService : InputMethodService() {
             true
         }
 
+        // Draft button (✨) for LLM-powered drafting
+        draftButton = view.findViewById<Button>(R.id.key_draft)
+        draftButton?.setOnClickListener {
+            if (!isDrafting && !isTranscribing) {
+                handleDraftInput()
+            }
+        }
+
         // Period key
         view.findViewById<Button>(R.id.key_period).setOnClickListener {
             currentInputConnection?.commitText(".", 1)
@@ -160,12 +186,13 @@ class PeyoKeysService : InputMethodService() {
         }
 
         // Return key
-        view.findViewById<Button>(R.id.key_return).setOnClickListener {
+        view.findViewById<ImageButton>(R.id.key_return).setOnClickListener {
             handleReturnKey()
         }
 
-        // Initialize letter case
+        // Initialize letter case and shift icon
         updateLetterCase()
+        updateShiftIcon()
     }
 
     private fun setupLetterKey(view: View, buttonId: Int, letter: String) {
@@ -178,6 +205,7 @@ class PeyoKeysService : InputMethodService() {
             if (isShifted) {
                 isShifted = false
                 updateLetterCase()
+                updateShiftIcon()
             }
         }
     }
@@ -186,6 +214,13 @@ class PeyoKeysService : InputMethodService() {
         letterButtons.forEach { (char, button) ->
             button.text = if (isShifted) char.uppercase() else char.lowercase()
         }
+    }
+
+    private fun updateShiftIcon() {
+        shiftButton?.setImageResource(
+            if (isShifted) R.drawable.ic_shift_locked
+            else R.drawable.ic_shift
+        )
     }
 
     private fun checkAndUpdateShiftState() {
@@ -202,6 +237,7 @@ class PeyoKeysService : InputMethodService() {
         if (shouldCapitalize != isShifted) {
             isShifted = shouldCapitalize
             updateLetterCase()
+            updateShiftIcon()
         }
     }
 
@@ -215,7 +251,7 @@ class PeyoKeysService : InputMethodService() {
             return
         }
 
-        val activeModel = VoiceModelPreferences.getActiveModel(this) ?: "whisper-base"
+        val activeModel = VoiceModelPreferences.getActiveModel(this)
         Log.d(TAG, "Voice input triggered via long press on space, active model: $activeModel")
 
         serviceScope.launch {
@@ -272,6 +308,100 @@ class PeyoKeysService : InputMethodService() {
         }
     }
 
+    private fun handleDraftInput() {
+        // Check for microphone permission
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "Microphone permission not granted for draft")
+            showDraftButtonMessage("Grant mic permission")
+            requestMicrophonePermission()
+            return
+        }
+
+        val activeVoiceModel = VoiceModelPreferences.getActiveModel(this) ?: "whisper-base"
+        val activeLMModel = LMModelPreferences.getActiveModel(this)
+
+        serviceScope.launch {
+            try {
+                // Set drafting state
+                isDrafting = true
+                draftButton?.text = "🎙️"
+                draftButton?.alpha = 0.7f
+
+                // Initialize STT if needed
+                if (!stt.isReady()) {
+                    stt.init(activeVoiceModel)
+                }
+
+                // Transcribe user's instruction
+                val transcriptionResult = stt.transcribe()
+
+                if (transcriptionResult == null || transcriptionResult.text.isNullOrBlank()) {
+                    Log.d(TAG, "No speech detected for draft instruction")
+                    showDraftButtonMessage("No speech detected")
+                    return@launch
+                }
+
+                val instruction = transcriptionResult.text
+                Log.d(TAG, "Draft instruction transcribed: $instruction")
+
+                // Show processing state
+                draftButton?.text = "⏳"
+
+                // Initialize LM model
+                try {
+                    lm.initializeModel(
+                        CactusInitParams(
+                            model = activeLMModel,
+                        )
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error initializing LM model: $activeLMModel", e)
+                    showDraftButtonMessage("Model not downloaded")
+                    return@launch
+                }
+
+                // Create prompt for LM
+                val systemPrompt = "You are a helpful writing assistant. Generate the requested content concisely. Only provide the content itself, without any preamble or explanation."
+
+                // Generate completion
+                val result = lm.generateCompletion(
+                    messages = listOf(
+                        ChatMessage(content = systemPrompt, role = "system"),
+                        ChatMessage(content = instruction!!, role = "user")
+                    )
+                )
+
+                if (result != null && result.success && result.response?.isNotBlank() == true) {
+                    currentInputConnection?.commitText(result.response, 1)
+                    Log.d(TAG, "Draft content inserted: ${result.response?.take(50)}... (${result.tokensPerSecond} tokens/s)")
+                } else {
+                    Log.d(TAG, "LM returned empty or failed response")
+                    showDraftButtonMessage("Generation failed")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during draft input", e)
+                showDraftButtonMessage("Draft failed")
+            } finally {
+                // Reset drafting state
+                isDrafting = false
+                draftButton?.text = "✨"
+                draftButton?.alpha = 1.0f
+            }
+        }
+    }
+
+    private fun showDraftButtonMessage(message: String) {
+        draftButton?.text = message
+        draftButton?.alpha = 0.7f
+        draftButton?.postDelayed({
+            if (!isDrafting) {
+                draftButton?.text = "✨"
+                draftButton?.alpha = 1.0f
+            }
+        }, 3000)
+    }
+
     private fun setupNumbersKeyboard(view: View) {
         // Number keys
         setupSimpleKey(view, R.id.key_1, "1")
@@ -307,7 +437,7 @@ class PeyoKeysService : InputMethodService() {
         setupSimpleKey(view, R.id.key_question, "?")
 
         // Backspace
-        view.findViewById<Button>(R.id.key_backspace_num).setOnClickListener {
+        view.findViewById<ImageButton>(R.id.key_backspace_num).setOnClickListener {
             currentInputConnection?.deleteSurroundingText(1, 0)
         }
 
@@ -338,13 +468,21 @@ class PeyoKeysService : InputMethodService() {
             true
         }
 
+        // Draft button (✨) for LLM-powered drafting
+        draftButton = view.findViewById<Button>(R.id.key_draft_num)
+        draftButton?.setOnClickListener {
+            if (!isDrafting && !isTranscribing) {
+                handleDraftInput()
+            }
+        }
+
         // Period
         view.findViewById<Button>(R.id.key_period_num).setOnClickListener {
             currentInputConnection?.commitText(".", 1)
         }
 
         // Return
-        view.findViewById<Button>(R.id.key_return_num).setOnClickListener {
+        view.findViewById<ImageButton>(R.id.key_return_num).setOnClickListener {
             handleReturnKey()
         }
     }
