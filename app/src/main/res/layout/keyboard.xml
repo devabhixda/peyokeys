@@ -4,10 +4,10 @@
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:background="@drawable/keyboard_background"
-    android:paddingStart="4dp"
-    android:paddingEnd="4dp"
-    android:paddingTop="8dp"
-    android:paddingBottom="8dp">
+    android:paddingStart="2dp"
+    android:paddingEnd="2dp"
+    android:paddingTop="4dp"
+    android:paddingBottom="6dp">
 
     <!-- Row 1: Q W E R T Y U I O P -->
     <LinearLayout
@@ -16,7 +16,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
-        android:layout_marginBottom="6dp">
+        android:layout_marginBottom="4dp">
 
         <Button android:id="@+id/key_q" style="@style/KeyButton" android:text="Q" />
         <Button android:id="@+id/key_w" style="@style/KeyButton" android:text="W" />
@@ -37,7 +37,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
-        android:layout_marginBottom="6dp"
+        android:layout_marginBottom="4dp"
         android:paddingStart="16dp"
         android:paddingEnd="16dp">
 
@@ -59,13 +59,14 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
-        android:layout_marginBottom="6dp">
+        android:layout_marginBottom="4dp">
 
-        <Button
+        <ImageButton
             android:id="@+id/key_shift"
             style="@style/SpecialKeyButton"
-            android:text="shift"
-            android:textSize="14sp" />
+            android:src="@drawable/ic_shift"
+            android:scaleType="center"
+            android:contentDescription="Shift" />
         <Button android:id="@+id/key_z" style="@style/KeyButton" android:text="Z" />
         <Button android:id="@+id/key_x" style="@style/KeyButton" android:text="X" />
         <Button android:id="@+id/key_c" style="@style/KeyButton" android:text="C" />
@@ -73,14 +74,15 @@
         <Button android:id="@+id/key_b" style="@style/KeyButton" android:text="B" />
         <Button android:id="@+id/key_n" style="@style/KeyButton" android:text="N" />
         <Button android:id="@+id/key_m" style="@style/KeyButton" android:text="M" />
-        <Button
+        <ImageButton
             android:id="@+id/key_backspace"
             style="@style/SpecialKeyButton"
-            android:text="⌫"
-            android:textSize="24sp" />
+            android:src="@drawable/ic_backspace"
+            android:scaleType="center"
+            android:contentDescription="Backspace" />
     </LinearLayout>
 
-    <!-- Row 4: ?123, comma, spacebar, period, return -->
+    <!-- Row 4: ?123, comma, draft button, spacebar, period, return -->
     <LinearLayout
         android:id="@+id/row4"
         android:layout_width="match_parent"
@@ -102,25 +104,33 @@
             android:layout_width="0dp"
             android:layout_weight="0.8" />
         <Button
+            android:id="@+id/key_draft"
+            style="@style/SpecialKeyButton"
+            android:text="✨"
+            android:textSize="20sp"
+            android:layout_width="0dp"
+            android:layout_weight="1" />
+        <Button
             android:id="@+id/key_space"
             style="@style/KeyButton"
             android:text="hold to talk"
             android:textSize="12sp"
             android:layout_width="0dp"
-            android:layout_weight="3.8" />
+            android:layout_weight="2.6" />
         <Button
             android:id="@+id/key_period"
             style="@style/SpecialKeyButton"
             android:text="."
             android:layout_width="0dp"
             android:layout_weight="0.8" />
-        <Button
+        <ImageButton
             android:id="@+id/key_return"
             style="@style/SpecialKeyButton"
-            android:text="↵"
-            android:textSize="24sp"
+            android:src="@drawable/ic_return"
+            android:scaleType="center"
+            android:contentDescription="Return"
             android:layout_width="0dp"
-            android:layout_weight="1.5" />
+            android:layout_weight="1" />
     </LinearLayout>
 
 </LinearLayout>

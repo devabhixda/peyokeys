@@ -25,4 +25,7 @@
     <color name="special_key_background_dark">#3A3A3C</color>
     <color name="key_text_dark">#FFFFFF</color>
     <color name="special_key_text_dark">#A0A0A0</color>
+
+    <!-- Theme-aware colors (overridden in values-night) -->
+    <color name="icon_tint">@color/special_key_text_light</color>
 </resources>

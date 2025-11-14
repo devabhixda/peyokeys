@@ -4,10 +4,10 @@
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:background="@drawable/keyboard_background"
-    android:paddingStart="4dp"
-    android:paddingEnd="4dp"
-    android:paddingTop="8dp"
-    android:paddingBottom="8dp">
+    android:paddingStart="2dp"
+    android:paddingEnd="2dp"
+    android:paddingTop="4dp"
+    android:paddingBottom="6dp">
 
     <!-- Row 1: Numbers 1-0 -->
     <LinearLayout
@@ -15,7 +15,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
-        android:layout_marginBottom="6dp">
+        android:layout_marginBottom="4dp">
 
         <Button android:id="@+id/key_1" style="@style/KeyButton" android:text="1" />
         <Button android:id="@+id/key_2" style="@style/KeyButton" android:text="2" />
@@ -35,7 +35,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
-        android:layout_marginBottom="6dp">
+        android:layout_marginBottom="4dp">
 
         <Button android:id="@+id/key_at" style="@style/KeyButton" android:text="\@" />
         <Button android:id="@+id/key_hash" style="@style/KeyButton" android:text="#" />
@@ -55,7 +55,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
-        android:layout_marginBottom="6dp">
+        android:layout_marginBottom="4dp">
 
         <Button android:id="@+id/key_asterisk" style="@style/KeyButton" android:text="*" />
         <Button android:id="@+id/key_quote" style="@style/KeyButton" android:text="&quot;" />
@@ -64,14 +64,15 @@
         <Button android:id="@+id/key_semicolon" style="@style/KeyButton" android:text=";" />
         <Button android:id="@+id/key_exclamation" style="@style/KeyButton" android:text="!" />
         <Button android:id="@+id/key_question" style="@style/KeyButton" android:text="\?" />
-        <Button
+        <ImageButton
             android:id="@+id/key_backspace_num"
             style="@style/SpecialKeyButton"
-            android:text="⌫"
-            android:textSize="24sp" />
+            android:src="@drawable/ic_backspace"
+            android:scaleType="center"
+            android:contentDescription="Backspace" />
     </LinearLayout>
 
-    <!-- Row 4: ABC, comma, spacebar, period, return -->
+    <!-- Row 4: ABC, comma, draft button, spacebar, period, return -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -92,25 +93,33 @@
             android:layout_width="0dp"
             android:layout_weight="0.8" />
         <Button
+            android:id="@+id/key_draft_num"
+            style="@style/SpecialKeyButton"
+            android:text="✨"
+            android:textSize="20sp"
+            android:layout_width="0dp"
+            android:layout_weight="1" />
+        <Button
             android:id="@+id/key_space_num"
             style="@style/KeyButton"
             android:text="hold to talk"
             android:textSize="12sp"
             android:layout_width="0dp"
-            android:layout_weight="3.8" />
+            android:layout_weight="2.6" />
         <Button
             android:id="@+id/key_period_num"
             style="@style/SpecialKeyButton"
             android:text="."
             android:layout_width="0dp"
             android:layout_weight="0.8" />
-        <Button
+        <ImageButton
             android:id="@+id/key_return_num"
             style="@style/SpecialKeyButton"
-            android:text="↵"
-            android:textSize="24sp"
+            android:src="@drawable/ic_return"
+            android:scaleType="center"
+            android:contentDescription="Return"
             android:layout_width="0dp"
-            android:layout_weight="1.5" />
+            android:layout_weight="1" />
     </LinearLayout>
 
 </LinearLayout>

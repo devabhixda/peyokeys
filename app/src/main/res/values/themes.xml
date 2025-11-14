@@ -18,9 +18,9 @@
     <!-- Keyboard Key Styles -->
     <style name="KeyButton">
         <item name="android:layout_width">0dp</item>
-        <item name="android:layout_height">48dp</item>
+        <item name="android:layout_height">42dp</item>
         <item name="android:layout_weight">1</item>
-        <item name="android:layout_margin">3dp</item>
+        <item name="android:layout_margin">2dp</item>
         <item name="android:background">@drawable/key_background</item>
         <item name="android:textColor">@color/key_text_light</item>
         <item name="android:textSize">18sp</item>
