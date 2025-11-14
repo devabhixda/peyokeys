@@ -161,9 +161,7 @@ class PeyoKeysService : InputMethodService() {
 
         // Return key
         view.findViewById<Button>(R.id.key_return).setOnClickListener {
-            currentInputConnection?.commitText("\n", 1)
-            isShifted = true
-            updateLetterCase()
+            handleReturnKey()
         }
 
         // Initialize letter case
@@ -347,13 +345,36 @@ class PeyoKeysService : InputMethodService() {
 
         // Return
         view.findViewById<Button>(R.id.key_return_num).setOnClickListener {
-            currentInputConnection?.commitText("\n", 1)
+            handleReturnKey()
         }
     }
 
     private fun setupSimpleKey(view: View, buttonId: Int, text: String) {
         view.findViewById<Button>(buttonId).setOnClickListener {
             currentInputConnection?.commitText(text, 1)
+        }
+    }
+
+    private fun handleReturnKey() {
+        val ic = currentInputConnection ?: return
+        val imeOptions = currentInputEditorInfo?.imeOptions ?: 0
+        val action = imeOptions and EditorInfo.IME_MASK_ACTION
+
+        when (action) {
+            EditorInfo.IME_ACTION_SEARCH,
+            EditorInfo.IME_ACTION_GO,
+            EditorInfo.IME_ACTION_SEND,
+            EditorInfo.IME_ACTION_DONE -> {
+                // Perform the action for search, go, send, or done
+                ic.performEditorAction(action)
+                Log.d(TAG, "Performed editor action: $action")
+            }
+            else -> {
+                // Default: insert newline
+                ic.commitText("\n", 1)
+                isShifted = true
+                updateLetterCase()
+            }
         }
     }
 }
