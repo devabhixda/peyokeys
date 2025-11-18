@@ -5,10 +5,13 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
 import android.util.Log
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.ImageButton
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.cactus.CactusContextInitializer
@@ -16,6 +19,7 @@ import com.cactus.CactusLM
 import com.cactus.CactusSTT
 import com.cactus.CactusInitParams
 import com.cactus.ChatMessage
+import com.cactus.SpeechRecognitionParams
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,19 +28,29 @@ import kotlinx.coroutines.launch
 
 class PeyoKeysService : InputMethodService() {
 
+    private enum class State {
+        IDLE,
+        RECORDING_FOR_TRANSCRIBE,
+        RECORDING_FOR_DRAFT,
+        TRANSCRIBING,
+        DRAFTING
+    }
+
+    private var currentState = State.IDLE
     private var isShifted = true  // Start with capital letters
     private val letterButtons = mutableMapOf<Char, Button>()
     private lateinit var stt: CactusSTT
     private lateinit var lm: CactusLM
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var spaceButton: Button? = null
     private var shiftButton: ImageButton? = null
-    private var isTranscribing = false
     private var isNumbersLayout = false
 
-    // Draft button state management
-    private var draftButton: Button? = null
-    private var isDrafting = false
+    // Toolbar button state management
+    private var toolbarMicButton: Button? = null
+    private var toolbarDraftButton: Button? = null
+    private var toolbarStatus: TextView? = null
+    private var toolbarMicProgress: ProgressBar? = null
+    private var toolbarDraftProgress: ProgressBar? = null
 
     companion object {
         private const val TAG = "PeyoKeysService"
@@ -75,27 +89,77 @@ class PeyoKeysService : InputMethodService() {
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
-        Log.d(TAG, "onStartInput() called - inputType: ${attribute?.inputType}")
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        Log.d(TAG, "onStartInputView() called")
         checkAndUpdateShiftState()
     }
 
     override fun onEvaluateFullscreenMode(): Boolean {
-        Log.d(TAG, "onEvaluateFullscreenMode() called")
         return false
     }
 
     override fun onEvaluateInputViewShown(): Boolean {
         super.onEvaluateInputViewShown()
-        Log.d(TAG, "onEvaluateInputViewShown() called")
         return true
     }
 
+    private fun setupToolbar(view: View) {
+        // Toolbar buttons and status
+        toolbarMicButton = view.findViewById<Button>(R.id.toolbar_microphone)
+            ?: view.findViewById<Button>(R.id.toolbar_microphone_num)
+        toolbarDraftButton = view.findViewById<Button>(R.id.toolbar_draft)
+            ?: view.findViewById<Button>(R.id.toolbar_draft_num)
+        toolbarStatus = view.findViewById<TextView>(R.id.toolbar_status)
+            ?: view.findViewById<TextView>(R.id.toolbar_status_num)
+        toolbarMicProgress = view.findViewById<ProgressBar>(R.id.toolbar_microphone_progress)
+            ?: view.findViewById<ProgressBar>(R.id.toolbar_microphone_progress_num)
+        toolbarDraftProgress = view.findViewById<ProgressBar>(R.id.toolbar_draft_progress)
+            ?: view.findViewById<ProgressBar>(R.id.toolbar_draft_progress_num)
+
+        // Hold-to-speak for Transcribe button
+        toolbarMicButton?.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (currentState == State.IDLE) {
+                        startVoiceRecording()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (currentState == State.RECORDING_FOR_TRANSCRIBE) {
+                        stopVoiceRecordingAndTranscribe()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+
+        // Hold-to-speak for AI Draft button
+        toolbarDraftButton?.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (currentState == State.IDLE) {
+                        startDraftRecording()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (currentState == State.RECORDING_FOR_DRAFT) {
+                        stopDraftRecordingAndGenerate()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
     private fun setupKeyboard(view: View) {
+        setupToolbar(view)
+
         // Letter keys - Row 1
         setupLetterKey(view, R.id.key_q, "Q")
         setupLetterKey(view, R.id.key_w, "W")
@@ -155,28 +219,9 @@ class PeyoKeysService : InputMethodService() {
         }
 
         // Space key
-        spaceButton = view.findViewById<Button>(R.id.key_space)
-        spaceButton?.setOnClickListener {
-            if (!isTranscribing) {
-                currentInputConnection?.commitText(" ", 1)
-                checkAndUpdateShiftState()
-            }
-        }
-
-        // Long press on space for voice input
-        spaceButton?.setOnLongClickListener {
-            if (!isTranscribing) {
-                handleVoiceInput()
-            }
-            true
-        }
-
-        // Draft button (✨) for LLM-powered drafting
-        draftButton = view.findViewById<Button>(R.id.key_draft)
-        draftButton?.setOnClickListener {
-            if (!isDrafting && !isTranscribing) {
-                handleDraftInput()
-            }
+        view.findViewById<Button>(R.id.key_space).setOnClickListener {
+            currentInputConnection?.commitText(" ", 1)
+            checkAndUpdateShiftState()
         }
 
         // Period key
@@ -241,58 +286,94 @@ class PeyoKeysService : InputMethodService() {
         }
     }
 
-    private fun handleVoiceInput() {
+    private fun startVoiceRecording() {
         // Check for microphone permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
             Log.d(TAG, "Microphone permission not granted")
-            showSpacebarMessage("Grant mic permission in app")
+            Toast.makeText(this, "Grant mic permission in app", Toast.LENGTH_SHORT).show()
             requestMicrophonePermission()
             return
         }
 
         val activeModel = VoiceModelPreferences.getActiveModel(this)
-        Log.d(TAG, "Voice input triggered via long press on space, active model: $activeModel")
+        Log.d(TAG, "Starting voice recording, active model: $activeModel")
 
-        serviceScope.launch {
+        // Set recording state immediately on main thread (synchronously)
+        currentState = State.RECORDING_FOR_TRANSCRIBE
+        toolbarMicButton?.isEnabled = true
+        toolbarMicButton?.alpha = 0.7f
+        toolbarMicButton?.text = "Listening..."
+        toolbarStatus?.text = "Recording..."
+        toolbarMicProgress?.visibility = View.GONE
+
+        serviceScope.launch(Dispatchers.IO) {
             try {
-                // Set transcribing state
-                isTranscribing = true
-                spaceButton?.text = "Transcribing..."
-                spaceButton?.alpha = 0.7f
-
                 if (!stt.isReady()) {
                     stt.init(activeModel)
                 }
-                val result = stt.transcribe()
 
-                if (result != null && result.text?.isNotBlank() == true) {
-                    currentInputConnection?.commitText(result.text, 1)
-                    Log.d(TAG, "Transcribed text: ${result.text}")
-                } else {
-                    Log.d(TAG, "No speech detected or empty result")
+                // Start recording with long duration, result will come here (blocking on IO thread)
+                // When stop() is called, this will return with the transcription result
+                val result = stt.transcribe(
+                    params = SpeechRecognitionParams(maxDuration = Long.MAX_VALUE)
+                )
+
+                // transcribe() has completed, update UI and insert text on main thread
+                launch(Dispatchers.Main) {
+                    if (result != null && result.text?.isNotBlank() == true) {
+                        currentInputConnection?.commitText(result.text, 1)
+                        Log.d(TAG, "Transcribed text: ${result.text}")
+                    } else {
+                        Log.d(TAG, "No speech detected or empty result")
+                        Toast.makeText(this@PeyoKeysService, "No speech detected", Toast.LENGTH_SHORT).show()
+                    }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error during voice input transcription", e)
-                showSpacebarMessage("Transcription failed")
+                Log.e(TAG, "Error during voice recording", e)
+                launch(Dispatchers.Main) {
+                    Toast.makeText(this@PeyoKeysService, "Transcription failed", Toast.LENGTH_SHORT).show()
+                }
             } finally {
-                // Reset transcribing state
-                isTranscribing = false
-                spaceButton?.text = "hold to talk"
-                spaceButton?.alpha = 1.0f
+                // Reset recording and transcribing state on main thread
+                launch(Dispatchers.Main) {
+                    currentState = State.IDLE
+                    toolbarMicButton?.isEnabled = true
+                    toolbarMicButton?.alpha = 1.0f
+                    toolbarMicButton?.text = "Transcribe"
+                    toolbarMicProgress?.visibility = View.GONE
+                    toolbarStatus?.text = "Hold the buttons to start"
+                }
             }
         }
     }
 
-    private fun showSpacebarMessage(message: String) {
-        spaceButton?.text = message
-        spaceButton?.alpha = 0.7f
-        spaceButton?.postDelayed({
-            if (!isTranscribing) {
-                spaceButton?.text = "hold to talk"
-                spaceButton?.alpha = 1.0f
+    private fun stopVoiceRecordingAndTranscribe() {
+        // Update status IMMEDIATELY on main thread (synchronously)
+        currentState = State.TRANSCRIBING
+        toolbarMicButton?.isEnabled = false
+        toolbarMicButton?.alpha = 0.5f
+        toolbarMicButton?.text = ""
+        toolbarMicProgress?.visibility = View.VISIBLE
+        toolbarStatus?.text = "Transcribing..."
+
+        // Stop the recording in the background
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                stt.stop()
+                Log.d(TAG, "Voice recording stopped, transcription will begin")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping voice recording", e)
+                launch(Dispatchers.Main) {
+                    currentState = State.IDLE
+                    toolbarMicButton?.isEnabled = true
+                    toolbarMicButton?.alpha = 1.0f
+                    toolbarMicButton?.text = "Transcribe"
+                    toolbarMicProgress?.visibility = View.GONE
+                    toolbarStatus?.text = "Hold the buttons to start"
+                }
             }
-        }, 3000)
+        }
     }
 
     private fun requestMicrophonePermission() {
@@ -308,45 +389,62 @@ class PeyoKeysService : InputMethodService() {
         }
     }
 
-    private fun handleDraftInput() {
+    private fun startDraftRecording() {
         // Check for microphone permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
             Log.d(TAG, "Microphone permission not granted for draft")
-            showDraftButtonMessage("Grant mic permission")
+            Toast.makeText(this, "Grant mic permission in app", Toast.LENGTH_SHORT).show()
             requestMicrophonePermission()
             return
         }
 
         val activeVoiceModel = VoiceModelPreferences.getActiveModel(this) ?: "whisper-base"
         val activeLMModel = LMModelPreferences.getActiveModel(this)
+        Log.d(TAG, "Starting draft recording, active model: $activeVoiceModel")
 
-        serviceScope.launch {
+        // Set recording state immediately on main thread (synchronously)
+        currentState = State.RECORDING_FOR_DRAFT
+        toolbarDraftButton?.isEnabled = true
+        toolbarDraftButton?.alpha = 0.7f
+        toolbarDraftButton?.text = "Listening..."
+        toolbarStatus?.text = "Recording..."
+        toolbarDraftProgress?.visibility = View.GONE
+
+        serviceScope.launch(Dispatchers.IO) {
             try {
-                // Set drafting state
-                isDrafting = true
-                draftButton?.text = "🎙️"
-                draftButton?.alpha = 0.7f
-
                 // Initialize STT if needed
                 if (!stt.isReady()) {
                     stt.init(activeVoiceModel)
                 }
 
-                // Transcribe user's instruction
-                val transcriptionResult = stt.transcribe()
+                // Start recording with long duration, result will come here (blocking on IO thread)
+                // When stop() is called, this will return with the transcription result
+                val transcriptionResult = stt.transcribe(
+                    params = SpeechRecognitionParams(maxDuration = Long.MAX_VALUE)
+                )
 
+                // transcribe() has completed, check result
                 if (transcriptionResult == null || transcriptionResult.text.isNullOrBlank()) {
                     Log.d(TAG, "No speech detected for draft instruction")
-                    showDraftButtonMessage("No speech detected")
+                    launch(Dispatchers.Main) {
+                        Toast.makeText(this@PeyoKeysService, "No speech detected", Toast.LENGTH_SHORT).show()
+                    }
                     return@launch
                 }
 
                 val instruction = transcriptionResult.text
                 Log.d(TAG, "Draft instruction transcribed: $instruction")
 
-                // Show processing state
-                draftButton?.text = "⏳"
+                // Show processing state on main thread
+                launch(Dispatchers.Main) {
+                    currentState = State.DRAFTING
+                    toolbarDraftButton?.isEnabled = false
+                    toolbarDraftButton?.alpha = 0.5f
+                    toolbarDraftButton?.text = ""
+                    toolbarDraftProgress?.visibility = View.VISIBLE
+                    toolbarStatus?.text = "AI is drafting..."
+                }
 
                 // Initialize LM model
                 try {
@@ -357,7 +455,9 @@ class PeyoKeysService : InputMethodService() {
                     )
                 } catch (e: Exception) {
                     Log.e(TAG, "Error initializing LM model: $activeLMModel", e)
-                    showDraftButtonMessage("Model not downloaded")
+                    launch(Dispatchers.Main) {
+                        Toast.makeText(this@PeyoKeysService, "Model not downloaded", Toast.LENGTH_SHORT).show()
+                    }
                     return@launch
                 }
 
@@ -372,37 +472,66 @@ class PeyoKeysService : InputMethodService() {
                     )
                 )
 
-                if (result != null && result.success && result.response?.isNotBlank() == true) {
-                    currentInputConnection?.commitText(result.response, 1)
-                    Log.d(TAG, "Draft content inserted: ${result.response?.take(50)}... (${result.tokensPerSecond} tokens/s)")
-                } else {
-                    Log.d(TAG, "LM returned empty or failed response")
-                    showDraftButtonMessage("Generation failed")
+                // Insert result on main thread
+                launch(Dispatchers.Main) {
+                    if (result != null && result.success && result.response?.isNotBlank() == true) {
+                        currentInputConnection?.commitText(result.response, 1)
+                        Log.d(TAG, "Draft content inserted: ${result.response?.take(50)}... (${result.tokensPerSecond} tokens/s)")
+                    } else {
+                        Log.d(TAG, "LM returned empty or failed response")
+                        Toast.makeText(this@PeyoKeysService, "Generation failed", Toast.LENGTH_SHORT).show()
+                    }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error during draft input", e)
-                showDraftButtonMessage("Draft failed")
+                Log.e(TAG, "Error during draft recording/generation", e)
+                launch(Dispatchers.Main) {
+                    Toast.makeText(this@PeyoKeysService, "Draft failed", Toast.LENGTH_SHORT).show()
+                }
             } finally {
-                // Reset drafting state
-                isDrafting = false
-                draftButton?.text = "✨"
-                draftButton?.alpha = 1.0f
+                // Reset drafting state on main thread
+                launch(Dispatchers.Main) {
+                    currentState = State.IDLE
+                    toolbarDraftButton?.isEnabled = true
+                    toolbarDraftButton?.alpha = 1.0f
+                    toolbarDraftButton?.text = "AI Draft"
+                    toolbarDraftProgress?.visibility = View.GONE
+                    toolbarStatus?.text = "Hold the buttons to start"
+                }
             }
         }
     }
 
-    private fun showDraftButtonMessage(message: String) {
-        draftButton?.text = message
-        draftButton?.alpha = 0.7f
-        draftButton?.postDelayed({
-            if (!isDrafting) {
-                draftButton?.text = "✨"
-                draftButton?.alpha = 1.0f
+    private fun stopDraftRecordingAndGenerate() {
+        // Update status IMMEDIATELY on main thread (synchronously)
+        currentState = State.TRANSCRIBING
+        toolbarDraftButton?.isEnabled = false
+        toolbarDraftButton?.alpha = 0.5f
+        toolbarDraftButton?.text = ""
+        toolbarDraftProgress?.visibility = View.VISIBLE
+        toolbarStatus?.text = "Transcribing..."
+
+        // Stop the recording in the background
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                stt.stop()
+                Log.d(TAG, "Draft recording stopped, transcription will begin")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping draft recording", e)
+                launch(Dispatchers.Main) {
+                    currentState = State.IDLE
+                    toolbarDraftButton?.isEnabled = true
+                    toolbarDraftButton?.alpha = 1.0f
+                    toolbarDraftButton?.text = "AI Draft"
+                    toolbarDraftProgress?.visibility = View.GONE
+                    toolbarStatus?.text = "Hold the buttons to start"
+                }
             }
-        }, 3000)
+        }
     }
 
     private fun setupNumbersKeyboard(view: View) {
+        setupToolbar(view)
+
         // Number keys
         setupSimpleKey(view, R.id.key_1, "1")
         setupSimpleKey(view, R.id.key_2, "2")
@@ -453,27 +582,8 @@ class PeyoKeysService : InputMethodService() {
         }
 
         // Space key
-        spaceButton = view.findViewById<Button>(R.id.key_space_num)
-        spaceButton?.setOnClickListener {
-            if (!isTranscribing) {
-                currentInputConnection?.commitText(" ", 1)
-            }
-        }
-
-        // Long press on space for voice input
-        spaceButton?.setOnLongClickListener {
-            if (!isTranscribing) {
-                handleVoiceInput()
-            }
-            true
-        }
-
-        // Draft button (✨) for LLM-powered drafting
-        draftButton = view.findViewById<Button>(R.id.key_draft_num)
-        draftButton?.setOnClickListener {
-            if (!isDrafting && !isTranscribing) {
-                handleDraftInput()
-            }
+        view.findViewById<Button>(R.id.key_space_num).setOnClickListener {
+            currentInputConnection?.commitText(" ", 1)
         }
 
         // Period
